@@ -4,9 +4,9 @@
 
 SFEVL53L1X distanceSensor;
 constexpr int TIMING_BUDGET_MS = 200;
-constexpr int MEASUREMENT_DURATION_MS = 3000;
-constexpr int SAMPLES_PER_CYCLE = 30;
-constexpr int DEVIATION_THRESHOLD_CM = 10;
+constexpr int SAMPLES_PER_CYCLE = 20;
+constexpr int DEVIATION_THRESHOLD_CM = 15;
+constexpr float acceptablePercentage = 0.3;
 //==============================//
 
 //===========HX711==============//
@@ -49,22 +49,7 @@ BLECharacteristic* pTxCharacteristic;
 BLECharacteristic* pRxCharacteristic;
 bool deviceConnected = false;
 bool awaitingResponse = false;
-//==============================//
-
-//===========WIFI===============//
-#include <WiFi.h>
-#include <WiFiUdp.h>
-
-const char* ssid = "DaalWiFi";
-const char* password = "Welkom123";
-const char* udpAddress = "172.20.10.7";
-const int udpPort = 4210;
-
-WiFiUDP udp;
-bool wifiReady = false;
-unsigned long lastWifiSendTime = 0;
-uint16_t matrixLwifi[15][7];
-uint16_t matrixRwifi[15][7];
+bool resultsSend = false;
 //==============================//
 
 enum State

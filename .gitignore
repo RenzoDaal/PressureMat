@@ -1,3 +1,5 @@
 .env
-
+heightAndWeight.py
+pressureVisual.py
+pressureVisualWifi.py
 pressure-env/

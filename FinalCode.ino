@@ -39,7 +39,7 @@ void updateHeightSensor()
     }
 
     outlierRatio = (float)outlierCount / count;
-    if (outlierRatio > 0.2) { return; }
+    if (outlierRatio > acceptablePercentage) { return; }
 
     finalHeigth = filteredSum / filteredCount;
     return;
@@ -47,7 +47,7 @@ void updateHeightSensor()
 
   if (currentState == APPROVED && timerStarts)
   {
-    if (distanceSensor.checkForDataReady() && count < SAMPLES_PER_CYCLE - 1)
+    if (distanceSensor.checkForDataReady())
     {
       uint16_t distance = distanceSensor.getDistance();
       readings[count++] = distance / 10.0;
@@ -161,10 +161,11 @@ void processBLECommand(String cmd)
   {
     resetDistanceVariables();
     currentState = START;
+    resultsSend = false;
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("Checking");
-    lcd.print(0, 1);
+    lcd.setCursor(0, 1);
     lcd.print("posture...");
   }
   else if (cmd == "DISAPPROVED")
@@ -211,6 +212,8 @@ void processBLECommand(String cmd)
   else if (cmd == "KILL")
   {
     currentState = PAIRING;
+    if (deviceConnected) { pServer->disconnect(pServer->getConnId()); }
+    deviceConnected = false;
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("Pressure Mat");
@@ -219,6 +222,7 @@ void processBLECommand(String cmd)
   }
 }
 
+int lastMatrixMeasured = millis();
 void sendMatrixPacket(uint8_t footId, uint16_t matrixData[15][7], bool viaBle, bool viaWiFi)
 {
   uint8_t packet[212];
@@ -263,6 +267,7 @@ void sendResultPacket(float finalWeight, float finalLength)
 
 void setup()
 {
+  Serial.begin(115200);
   //========VL53L1X=========//
   resetDistanceVariables();
   Wire.begin();
@@ -297,22 +302,9 @@ void setup()
   pServer->getAdvertising()->start();
   //========================//
 
-  //==========WIFI==========//
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts++ < 20); { delay(500); }
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    udp.begin(udpPort);
-    wifiReady = true;
-  }
-  else { wifiReady = false; }
-  //========================//
-
   //=========HX711==========//
   scale.begin(DT, SCK);
-  scale.set_scale(23750);
+  scale.set_scale(22301);
   scale.tare();
   //========================//
 
@@ -329,16 +321,6 @@ void setup()
 
 void loop()
 {
-  // Send matrix packets through WiFi 5 times a second
-  if (wifiReady && millis() - lastWifiSendTime > 200)
-  {
-    lastWifiSendTime = millis();
-    readMatrices(matrixLwifi, matrixRwifi);
-    sendMatrixPacket('L', matrixLwifi, false, true);
-    delay(5);
-    sendMatrixPacket('R', matrixRwifi, false, true);
-  }
-
   switch (currentState)
   {
     case PAIRING:
@@ -348,6 +330,7 @@ void loop()
         currentState = CONNECTED;
         break;
       }
+      break;
     }
     case CONNECTED:
     {
@@ -360,44 +343,57 @@ void loop()
     case DISAPPROVED:
     {
       if (awaitingResponse) { break; }
-      uint16_t matrixL[15][7];
-      uint16_t matrixR[15][7];
-      readMatrices(matrixL, matrixR);
-      sendMatrixPacket('L', matrixL, true, false);
-      delay(5);
-      sendMatrixPacket('R', matrixR, true, false);
-      delay(5);
-      awaitingResponse = true;
-      finalWeight = -1;
+      if (millis() - lastMatrixMeasured >= 500)
+      {
+        lastMatrixMeasured = millis();
+        uint16_t matrixL[15][7];
+        uint16_t matrixR[15][7];
+        readMatrices(matrixL, matrixR);
+        sendMatrixPacket('L', matrixL, true, false);
+        delay(5);
+        sendMatrixPacket('R', matrixR, true, false);
+        delay(5);
+        awaitingResponse = true;
+        finalWeight = -1;
+      }
       break;
     }
     case APPROVED:
     {
       updateHeightSensor();
-      finalWeight = scale.get_units(5);
       if (awaitingResponse) { break; }
-      uint16_t matrixL[15][7];
-      uint16_t matrixR[15][7];
-      readMatrices(matrixL, matrixR);
-      sendMatrixPacket('L', matrixL, true, false);
-      delay(5);
-      sendMatrixPacket('R', matrixR, true, false);
-      delay(5);
-      awaitingResponse = true;
+      if (millis() - lastMatrixMeasured >= 500)
+      {
+        lastMatrixMeasured = millis();
+        uint16_t matrixL[15][7];
+        uint16_t matrixR[15][7];
+        readMatrices(matrixL, matrixR);
+        sendMatrixPacket('L', matrixL, true, false);
+        delay(5);
+        sendMatrixPacket('R', matrixR, true, false);
+        delay(5);
+        awaitingResponse = true;
+      }
       break;
     }
     case RESULTS:
     {
-      updateHeightSensor();
-      sendResultPacket(finalWeight, finalHeigth);
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Weight: ");
-      lcd.print(finalWeight, 1);
-      lcd.setCursor(0, 1);
-      lcd.print("Length: ");
-      lcd.print(finalHeigth, 1);
-      awaitingResponse = false;
+      if (!resultsSend)
+      {
+        finalWeight = scale.get_units(5);
+        updateHeightSensor();
+        sendResultPacket(finalWeight, finalHeigth);
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Weight: ");
+        lcd.print(finalWeight, 1);
+        lcd.setCursor(0, 1);
+        lcd.print("Length: ");
+        lcd.print(finalHeigth, 1);
+        awaitingResponse = false;
+        resultsSend = true;
+        break;
+      }
       break;
     }
     default:
